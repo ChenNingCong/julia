@@ -140,11 +140,11 @@ void jl_throw_in_ctx(jl_value_t *excpt, PCONTEXT ctxThread)
                                               ct->gcstack);
         }
         else if (have_backtrace_fiber) {
-            JL_LOCK_NOGC(&backtrace_lock);
+            uv_mutex_lock(&backtrace_lock);
             stkerror_ctx = ctxThread;
             stkerror_ptls = ptls;
             jl_swapcontext(&error_return_fiber, &collect_backtrace_fiber);
-            JL_UNLOCK_NOGC(&backtrace_lock);
+            uv_mutex_unlock(&backtrace_lock);
         }
         ptls->sig_exception = excpt;
     }
@@ -342,7 +342,7 @@ static DWORD WINAPI profile_bt( LPVOID lparam )
                 continue;
             }
             else {
-                JL_LOCK_NOGC(&jl_in_stackwalk);
+                uv_mutex_lock(&jl_in_stackwalk);
                 jl_lock_profile();
                 if ((DWORD)-1 == SuspendThread(hMainThread)) {
                     fputs("failed to suspend main thread. aborting profiling.", stderr);
@@ -366,20 +366,20 @@ static DWORD WINAPI profile_bt( LPVOID lparam )
                     bt_data_prof[bt_size_cur++].uintptr = ptls->tid + 1;
 
                     // store task id
-                    bt_data_prof[bt_size_cur++].uintptr = ptls->current_task;
+                    bt_data_prof[bt_size_cur++].uintptr = jl_atomic_load_relaxed(&ptls->current_task);
 
                     // store cpu cycle clock
                     bt_data_prof[bt_size_cur++].uintptr = cycleclock();
 
                     // store whether thread is sleeping but add 1 as 0 is preserved to indicate end of block
-                    bt_data_prof[bt_size_cur++].uintptr = ptls->sleep_check_state + 1;
+                    bt_data_prof[bt_size_cur++].uintptr = jl_atomic_load_relaxed(&ptls->sleep_check_state) + 1;
 
                     // Mark the end of this block with two 0's
                     bt_data_prof[bt_size_cur++].uintptr = 0;
                     bt_data_prof[bt_size_cur++].uintptr = 0;
                 }
                 jl_unlock_profile();
-                JL_UNLOCK_NOGC(&jl_in_stackwalk);
+                uv_mutex_unlock(&jl_in_stackwalk);
                 if ((DWORD)-1 == ResumeThread(hMainThread)) {
                     jl_profile_stop_timer();
                     fputs("failed to resume main thread! aborting.", stderr);
@@ -390,7 +390,7 @@ static DWORD WINAPI profile_bt( LPVOID lparam )
         }
     }
     jl_unlock_profile();
-    JL_UNLOCK_NOGC(&jl_in_stackwalk);
+    uv_mutex_unlock(&jl_in_stackwalk);
     jl_profile_stop_timer();
     hBtThread = 0;
     return 0;
